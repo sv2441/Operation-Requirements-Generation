@@ -1,6 +1,7 @@
 # Importing necessary libraries
 import os
 import streamlit as st
+import tempfile
 import pandas as pd
 from dotenv import load_dotenv
 from langchain.chat_models import AzureChatOpenAI
@@ -40,9 +41,9 @@ llm_options = {
     )
 }
 
-# Determine the execution environment (development or production)
-is_dev = os.getenv("IS_DEV", "false").lower() == "true"
-data_path = "data" if is_dev else "/data"
+# # Determine the execution environment (development or production)
+# is_dev = os.getenv("IS_DEV", "false").lower() == "true"
+# data_path = "data" if is_dev else "/data"
 sample_data_path = "sample_data"
 
 # Function to retrieve a prompt for a given action from a CSV file
@@ -54,12 +55,12 @@ def get_prompt_for_action(action):
     else:
         return None 
 
-# Function to write a string to a CSV file, with an option to append or overwrite
-def str_to_csv(data, filename, append=True):
-    mode = 'a' if append else 'w'
-    with open(filename, mode, newline='', encoding='utf-8') as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow([data])  # Append the string as a single row
+def str_to_temp_csv(data, temp_file):
+    writer = csv.writer(temp_file)
+    writer.writerow([data])
+    temp_file.flush()  # Make sure data is written
+    return temp_file
+
 
 # Function to generate a download link for a DataFrame in CSV format
 def get_download_link(df):
@@ -86,29 +87,31 @@ def description_generator(df,llm):
 
     prompt = ChatPromptTemplate.from_template(template=title_template)
 
-    for index, row in df.iterrows():
-        count = 0
-        while count < 5:
-            try:
-                messages = prompt.format_messages(topic=row["Operational Requirements Title"], format_instructions=format_instructions)
-                response = chat_llm(messages)
-                response_as_dict = new_parser.parse(response.content)
-                data = response_as_dict
-                data=data.get('Description')
-                str_to_csv(data, f'{data_path}/data12.csv', append=True)
-                break
-            
-            except Exception as e:
-                print(f"Attempt {count + 1}: Failed to process row - {e}")
-                count += 1
+    with tempfile.NamedTemporaryFile(mode='w+', delete=False, newline='', encoding='utf-8') as temp_file:
+        for index, row in df.iterrows():
+            count = 0
+            while count < 5:
+                try:
+                    messages = prompt.format_messages(topic=row["Operational Requirements Title"], format_instructions=format_instructions)
+                    response = chat_llm(messages)
+                    response_as_dict = new_parser.parse(response.content)
+                    data = response_as_dict
+                    data=data.get('Description')
+                    str_to_temp_csv(data, temp_file)
+                    break
+                
+                except Exception as e:
+                    print(f"Attempt {count + 1}: Failed to process row - {e}")
+                    count += 1
 
-                if count >= 5:
-                    print("Maximum retries reached. Moving to the next row.")
-                    str_to_csv("", f'{data_path}/data12.csv', append=True)
-                    break 
-    data12 = pd.read_csv(f'{data_path}/data12.csv', names=['Operational Requirements Description'])
+                    if count >= 5:
+                        print("Maximum retries reached. Moving to the next row.")
+                        str_to_temp_csv(data, temp_file)
+                        break
+        temp_file.seek(0)  # Go back to the start of the file
+        data12 = pd.read_csv(temp_file.name, names=['Operational Requirements Description'])      
     result = pd.concat([df, data12], axis=1)
-    result.to_csv(f'{data_path}/PA-results.csv')
+    result.to_csv('PA-results.csv', index=False)
     st.write("Done for Description")
     # st.subheader("Operational Requirements Description Result")
     # st.dataframe(result)
@@ -143,35 +146,37 @@ def l1_title_generator(df,llm):
 
     prompt = ChatPromptTemplate.from_template(template=title_template)
 
-    for index, row in df.iterrows():
-        count = 0
-        while count < 5:
-            try:
-                messages = prompt.format_messages(topic=row['Actionable'], format_instructions=format_instructions)
-                response = chat_llm(messages)
-                response_as_dict = new_parser.parse(response.content)
-                data = response_as_dict.get('Action')
-                str_to_csv(data, f'{data_path}/data13.csv', append=True)
-                break  
+    with tempfile.NamedTemporaryFile(mode='w+', delete=False, newline='', encoding='utf-8') as temp_file:
+        for index, row in df.iterrows():
+            count = 0
+            while count < 5:
+                try:
+                    messages = prompt.format_messages(topic=row['Actionable'], format_instructions=format_instructions)
+                    response = chat_llm(messages)
+                    response_as_dict = new_parser.parse(response.content)
+                    data = response_as_dict.get('Action')
+                    str_to_temp_csv(data, temp_file)
+                    break  
 
-            except Exception as e:
-                print(f"Attempt {count + 1}: Failed to process row - {e}")
-                # Updating the title_template on exception
-                title_template += "\n Try to format the actions in dictionary format."
-                print(title_template)
-                prompt = ChatPromptTemplate.from_template(template=title_template)  # Update the prompt with the new template
-                count += 1
+                except Exception as e:
+                    print(f"Attempt {count + 1}: Failed to process row - {e}")
+                    # Updating the title_template on exception
+                    # title_template += "\n Try to format the actions in dictionary format."
+                    # print(title_template)
+                    # prompt = ChatPromptTemplate.from_template(template=title_template)  # Update the prompt with the new template
+                    count += 1
 
-                if count >= 5:
-                    print("Maximum retries reached. Moving to the next row.")
-                    str_to_csv("", f'{data_path}/data13.csv', append=True)
-                    break
-
-    data13 = pd.read_csv(f'{data_path}/data13.csv', encoding='cp1252', names=['Operational Requirements Title'])
+                    if count >= 5:
+                        print("Maximum retries reached. Moving to the next row.")
+                        str_to_temp_csv(data, temp_file)
+                        break
+        temp_file.seek(0)  # Go back to the start of the file
+        data13 = pd.read_csv(temp_file.name, names=['Operational Requirements Title']) 
     results = pd.concat([df, data13], axis=1)
-    results.to_csv(f"{data_path}/PA-results.csv")
+    results.to_csv("PA-results.csv", index=False)
     st.subheader("Operational Requirements Title Result")
     st.dataframe(results)
+    st.markdown(get_download_link(results), unsafe_allow_html=True)
 
 
 # Function to generate intended results for operational requirements
@@ -180,28 +185,29 @@ def intended_results_generator(df,llm):
 
     prompt = ChatPromptTemplate.from_template(template=title_template)
 
-    for index, row in df.iterrows():
-        count = 0
-        while count < 5:
-            try:
-                messages = prompt.format_messages(topic=row["Operational Requirements Description"])
-                response = chat_llm(messages)
-                data = str(response.content)
-                str_to_csv(data, f'{data_path}/data14.csv', append=True)
-                break
-            
-            except Exception as e:
-                print(f"Attempt {count + 1}: Failed to process row - {e}")
-                count += 1
-
-                if count >= 5:
-                    print("Maximum retries reached. Moving to the next row.")
-                    str_to_csv("", f'{data_path}/data14.csv', append=True)
+    with tempfile.NamedTemporaryFile(mode='w+', delete=False, newline='', encoding='utf-8') as temp_file:
+        for index, row in df.iterrows():
+            count = 0
+            while count < 5:
+                try:
+                    messages = prompt.format_messages(topic=row["Operational Requirements Description"])
+                    response = chat_llm(messages)
+                    data = str(response.content)
+                    str_to_temp_csv(data, temp_file)
                     break
-                 
-    data14 = pd.read_csv(f'{data_path}/data14.csv', names=['Operational Requirements Intended Results'])
+                
+                except Exception as e:
+                    print(f"Attempt {count + 1}: Failed to process row - {e}")
+                    count += 1
+
+                    if count >= 5:
+                        print("Maximum retries reached. Moving to the next row.")
+                        str_to_temp_csv(data, temp_file)
+                        break
+        temp_file.seek(0)  # Go back to the start of the file
+        data14 = pd.read_csv(temp_file.name, names=['Operational Requirements Intended Results'])            
     result = pd.concat([df, data14], axis=1)
-    result.to_csv(f'{data_path}/PA-results.csv', index=False)
+    result.to_csv('PA-results.csv', index=False)
     st.write("Done for Operational Requirements Intended Results")
     # st.dataframe(result)
     # st.markdown(get_download_link(result), unsafe_allow_html=True)
@@ -221,30 +227,31 @@ def artefact_description_generator(df,llm):
 
     prompt = ChatPromptTemplate.from_template(template=title_template)
 
-    for index, row in df.iterrows():
-        count = 0
-        while count < 5:
-            try:
-                messages = prompt.format_messages(topic=row["Operational Requirements Description"], format_instructions=format_instructions)
-                response = chat_llm(messages)
-                response_as_dict = new_parser.parse(response.content)
-                data = response_as_dict
-                data=data.get('Artefact Description')
-                str_to_csv(data, f'{data_path}/data15.csv', append=True)
-                break
-            
-            except Exception as e:
-                print(f"Attempt {count + 1}: Failed to process row - {e}")
-                count += 1
-
-                if count >= 5:
-                    print("Maximum retries reached. Moving to the next row.")
-                    str_to_csv("", f'{data_path}/data15.csv', append=True)
+    with tempfile.NamedTemporaryFile(mode='w+', delete=False, newline='', encoding='utf-8') as temp_file:
+        for index, row in df.iterrows():
+            count = 0
+            while count < 5:
+                try:
+                    messages = prompt.format_messages(topic=row["Operational Requirements Description"], format_instructions=format_instructions)
+                    response = chat_llm(messages)
+                    response_as_dict = new_parser.parse(response.content)
+                    data = response_as_dict
+                    data=data.get('Artefact Description')
+                    str_to_temp_csv(data, temp_file)
                     break
                 
-    data15 = pd.read_csv(f'{data_path}/data15.csv', names=['Operational Requirements Artefact Description'])
+                except Exception as e:
+                    print(f"Attempt {count + 1}: Failed to process row - {e}")
+                    count += 1
+
+                    if count >= 5:
+                        print("Maximum retries reached. Moving to the next row.")
+                        str_to_temp_csv(data, temp_file)
+                        break
+        temp_file.seek(0)  # Go back to the start of the file
+        data15 = pd.read_csv(temp_file.name, names=['Operational Requirements Artefact Description'])            
     result = pd.concat([df, data15], axis=1)
-    result.to_csv(f'{data_path}/PA-results.csv')
+    result.to_csv('PA-results.csv',index=False)
     st.write("Done for Operational Requirements Artefact Description")
     # st.subheader("Operational Requirements Artefact Description")
     # st.dataframe(result)
@@ -265,15 +272,18 @@ def specifications_generator(df,llm):
 
     prompt = ChatPromptTemplate.from_template(template=title_template)
 
-    for index, row in df.iterrows():
-        messages = prompt.format_messages(topic=row["Operational Requirements Description"])
-        response = chat_llm(messages)
-        data = str(response.content)  # Convert data to string
-        str_to_csv(data, f'{data_path}/data16.csv', append=True)
-        
-    data16 = pd.read_csv(f'{data_path}/data16.csv', names=['Operational Requirements Specifications'])
+    with tempfile.NamedTemporaryFile(mode='w+', delete=False, newline='', encoding='utf-8') as temp_file:
+
+        for index, row in df.iterrows():
+            messages = prompt.format_messages(topic=row["Operational Requirements Description"])
+            response = chat_llm(messages)
+            data = str(response.content)  # Convert data to string
+            str_to_temp_csv(data, temp_file)
+            
+        temp_file.seek(0)  # Go back to the start of the file
+        data16 = pd.read_csv(temp_file.name, names=['Operational Requirements Specifications'])            
     result = pd.concat([df, data16], axis=1)
-    result.to_csv(f'{data_path}/PA-results.csv', index=False)
+    result.to_csv('PA-results.csv', index=False)
     st.subheader("Done for Operational Requirements Generation")
     st.dataframe(result)
     st.markdown(get_download_link(result), unsafe_allow_html=True)
@@ -286,7 +296,7 @@ def main():
 
     # File upload functionality
     file = st.file_uploader("Upload a CSV file", type=["csv"])
-
+    
     # Dropdown to select a language model
     selected_llm = st.selectbox("Select a Language Model", options=list(llm_options.keys()))  
 
@@ -301,13 +311,12 @@ def main():
         st.subheader("CSV File Preview")
         st.dataframe(L1_df)
 
-       
-        if st.button("Generate IR/AD/SP for Operational Requirements"):
-            # l1_title_generator(L1_df,llm)
-            # description_generator(pd.read_csv(f'{data_path}/PA-results.csv'),llm)
+            
+         if st.button("Generate IR/AD/SP for Operational Requirements"):
+        
             intended_results_generator(L1_df,llm)
-            artefact_description_generator(pd.read_csv(f'{data_path}/PA-results.csv'),llm)
-            specifications_generator(pd.read_csv(f'{data_path}/PA-results.csv'),llm)
+            artefact_description_generator(pd.read_csv('PA-results.csv'),llm)
+            specifications_generator(pd.read_csv('PA-results.csv'),llm)
 
 # Entry point of the script
 if __name__ == "__main__":
