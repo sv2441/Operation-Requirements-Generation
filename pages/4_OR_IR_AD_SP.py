@@ -312,7 +312,7 @@ def main():
         st.dataframe(L1_df)
 
             
-         if st.button("Generate IR/AD/SP for Operational Requirements"):
+        if st.button("Generate IR/AD/SP for Operational Requirements"):
         
             intended_results_generator(L1_df,llm)
             artefact_description_generator(pd.read_csv('PA-results.csv'),llm)
