@@ -333,7 +333,12 @@ def specifications_generator(df,llm):
 def main():
     # Setting up the Streamlit interface
     st.image('logo.png')
-    st.title("👨‍💻 Operational Requirements Titles")
+    st.title("👨‍💻 Operational Requirements")
+    st.write("This application is a prototype for generating Operational Requirements from Regulatory Text.")
+    st.write("""
+             Input:- A CSV file with Regulatory Text.\n
+             Output:- Operational Requirements All.
+               """)
 
     # File upload functionality
     file = st.file_uploader("Upload a CSV file", type=["csv"])
